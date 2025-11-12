@@ -289,11 +289,18 @@ class AlzheimerClassifier:
         y_pred = self.model.predict(X_test)
         y_pred_proba = self.model.predict_proba(X_test)
 
-        # Calculate metrics
+        # Calculate metrics - overall
         accuracy = accuracy_score(y_test, y_pred)
+
+        # Macro averages
         precision_macro = precision_score(y_test, y_pred, average='macro')
         recall_macro = recall_score(y_test, y_pred, average='macro')
         f1_macro = f1_score(y_test, y_pred, average='macro')
+
+        # Weighted averages
+        precision_weighted = precision_score(y_test, y_pred, average='weighted')
+        recall_weighted = recall_score(y_test, y_pred, average='weighted')
+        f1_weighted = f1_score(y_test, y_pred, average='weighted')
 
         # Per-class metrics
         precision_per_class = precision_score(y_test, y_pred, average=None)
@@ -306,6 +313,9 @@ class AlzheimerClassifier:
             'precision_macro': precision_macro,
             'recall_macro': recall_macro,
             'f1_macro': f1_macro,
+            'precision_weighted': precision_weighted,
+            'recall_weighted': recall_weighted,
+            'f1_weighted': f1_weighted,
             'precision_per_class': precision_per_class,
             'recall_per_class': recall_per_class,
             'f1_per_class': f1_per_class,
@@ -314,28 +324,83 @@ class AlzheimerClassifier:
             'y_pred_proba': y_pred_proba
         }
 
-        # Print summary
-        print("\n" + "="*70)
-        print("MODEL EVALUATION RESULTS")
-        print("="*70)
-        print(f"Model Accuracy: {accuracy:.4f}")
-        print(f"Best Params: C={self.grid_search.best_params_['C']}, "
-              f"l1_ratio={self.grid_search.best_params_['l1_ratio']}")
-        print(f"Macro Precision: {precision_macro:.4f} | "
-              f"Macro Recall: {recall_macro:.4f} | "
-              f"Macro F1: {f1_macro:.4f}")
-        print("\nPer-Class Metrics:")
-        for i, class_name in enumerate(self.class_names):
-            print(f"  {class_name}: Precision={precision_per_class[i]:.4f}, "
-                  f"Recall={recall_per_class[i]:.4f}, F1={f1_per_class[i]:.4f}")
-        print("="*70 + "\n")
+        # Generate visualizations and get ROC-AUC metrics
+        cm = self._plot_confusion_matrix(y_test, y_pred)
+        roc_auc_dict = self._plot_roc_curves(X_test, y_test)
+
+        # Store ROC-AUC results
+        self.test_results['roc_auc'] = roc_auc_dict
+        self.test_results['confusion_matrix'] = cm
+
+        # Print and save comprehensive performance metrics
+        self._print_and_save_performance_metrics()
 
         # Generate detailed classification report
         self._save_classification_report(y_test, y_pred)
 
-        # Generate visualizations
-        self._plot_confusion_matrix(y_test, y_pred)
-        self._plot_roc_curves(X_test, y_test)
+    def _print_and_save_performance_metrics(self):
+        """Print and save comprehensive performance metrics."""
+        # Get cross-validation stats
+        cv_scores = self.cv_results['mean_test_score']
+        cv_mean = cv_scores.max()  # Best CV score
+        cv_std = self.cv_results.loc[self.cv_results['mean_test_score'].idxmax(), 'std_test_score']
+
+        # Prepare output text
+        output = []
+        output.append("\n" + "="*70)
+        output.append("### Performance Metrics")
+        output.append("="*70)
+
+        # Overall metrics
+        output.append(f"\nAccuracy: {self.test_results['accuracy']:.2f}")
+        output.append(f"Macro Avg → Precision: {self.test_results['precision_macro']:.2f} | "
+                     f"Recall: {self.test_results['recall_macro']:.2f} | "
+                     f"F1: {self.test_results['f1_macro']:.2f}")
+        output.append(f"Weighted Avg → Precision: {self.test_results['precision_weighted']:.2f} | "
+                     f"Recall: {self.test_results['recall_weighted']:.2f} | "
+                     f"F1: {self.test_results['f1_weighted']:.2f}")
+
+        # Per-class metrics
+        output.append("\n--- Per-Class ---")
+        for i, class_name in enumerate(self.class_names):
+            output.append(f"{class_name}: Precision {self.test_results['precision_per_class'][i]:.2f} | "
+                         f"Recall {self.test_results['recall_per_class'][i]:.2f} | "
+                         f"F1 {self.test_results['f1_per_class'][i]:.2f}")
+
+        # Confusion matrix
+        output.append("\n--- Confusion Matrix ---")
+        cm = self.test_results['confusion_matrix']
+        output.append(f"{'':>6} " + " ".join(f"{cls:>6}" for cls in self.class_names))
+        for i, class_name in enumerate(self.class_names):
+            output.append(f"{class_name:>6} " + " ".join(f"{cm[i][j]:>6}" for j in range(len(self.class_names))))
+
+        # ROC-AUC metrics
+        output.append("\n--- ROC-AUC Metrics ---")
+        roc_auc = self.test_results['roc_auc']
+        for i, class_name in enumerate(self.class_names):
+            output.append(f"{class_name} AUC: {roc_auc[i]:.2f}")
+        output.append(f"Micro-average AUC: {roc_auc['micro']:.2f}")
+        output.append(f"Macro-average AUC: {roc_auc['macro']:.2f}")
+        output.append(f"Weighted-average AUC: {roc_auc['weighted']:.2f}")
+
+        # Cross-validation summary
+        output.append("\n--- Cross-Validation Summary ---")
+        output.append(f"Mean CV Accuracy: {cv_mean:.4f} (±{cv_std:.4f})")
+        output.append(f"Best Parameters: C={self.grid_search.best_params_['C']}, "
+                     f"l1_ratio={self.grid_search.best_params_['l1_ratio']}")
+
+        output.append("="*70 + "\n")
+
+        # Print to console
+        for line in output:
+            print(line)
+
+        # Save to file
+        metrics_path = self.results_dir / 'performance_metrics.txt'
+        with open(metrics_path, 'w') as f:
+            f.write('\n'.join(output))
+
+        self.log(f"Performance metrics saved to {metrics_path}")
 
     def _save_classification_report(self, y_test: np.ndarray, y_pred: np.ndarray):
         """Save detailed classification report."""
@@ -387,12 +452,10 @@ class AlzheimerClassifier:
 
         self.log(f"Confusion matrix saved to {save_path}")
 
-        # Print confusion matrix
-        print("\nConfusion Matrix:")
-        print(pd.DataFrame(cm, index=self.class_names, columns=self.class_names))
+        return cm
 
     def _plot_roc_curves(self, X_test: np.ndarray, y_test: np.ndarray):
-        """Plot ROC curves (one-vs-rest) with micro and macro averages."""
+        """Plot ROC curves (one-vs-rest) with micro, macro, and weighted averages."""
         # Binarize labels for multi-class ROC
         y_test_bin = label_binarize(y_test, classes=range(len(self.class_names)))
         n_classes = len(self.class_names)
@@ -422,6 +485,9 @@ class AlzheimerClassifier:
         fpr["macro"] = all_fpr
         tpr["macro"] = mean_tpr
         roc_auc["macro"] = auc(fpr["macro"], tpr["macro"])
+
+        # Compute weighted-average AUC
+        roc_auc["weighted"] = roc_auc_score(y_test_bin, y_score, average='weighted', multi_class='ovr')
 
         # Plot ROC curves
         plt.figure(figsize=(12, 8))
@@ -467,11 +533,7 @@ class AlzheimerClassifier:
 
         self.log(f"ROC curves saved to {save_path}")
 
-        print(f"\nROC AUC Scores:")
-        for i, class_name in enumerate(self.class_names):
-            print(f"  {class_name}: {roc_auc[i]:.4f}")
-        print(f"  Micro-average: {roc_auc['micro']:.4f}")
-        print(f"  Macro-average: {roc_auc['macro']:.4f}")
+        return roc_auc
 
     def show_predictions(self, X_test: np.ndarray, y_test: np.ndarray, n_samples: int = 5):
         """
