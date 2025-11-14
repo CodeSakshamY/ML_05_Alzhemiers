@@ -153,29 +153,43 @@ class AlzheimerClassifier:
 
     def train_model(self, X_train: np.ndarray, y_train: np.ndarray):
         """
-        Train Elastic Net Logistic Regression with GridSearchCV.
+        Train Logistic Regression with L1, L2, and Elastic Net regularization using GridSearchCV.
 
         Args:
             X_train: Training features
             y_train: Training labels
         """
-        self.log("Setting up Elastic Net Logistic Regression with GridSearchCV...")
+        self.log("Setting up Logistic Regression with L1, L2, and Elastic Net regularization...")
 
         # Define base model
         base_model = LogisticRegression(
             multi_class='multinomial',
             solver='saga',
-            penalty='elasticnet',
             max_iter=10000,
             random_state=RANDOM_STATE,
             n_jobs=-1
         )
 
-        # Define hyperparameter grid
-        param_grid = {
-            'C': [0.01, 0.1, 1, 10],
-            'l1_ratio': [0.1, 0.5, 0.9]
-        }
+        # Define hyperparameter grid for different regularization types
+        # GridSearchCV supports a list of dictionaries for different parameter spaces
+        param_grid = [
+            # L1 Regularization (Lasso)
+            {
+                'penalty': ['l1'],
+                'C': [0.001, 0.01, 0.1, 1, 10, 100]
+            },
+            # L2 Regularization (Ridge)
+            {
+                'penalty': ['l2'],
+                'C': [0.001, 0.01, 0.1, 1, 10, 100]
+            },
+            # Elastic Net Regularization (L1 + L2 combination)
+            {
+                'penalty': ['elasticnet'],
+                'C': [0.001, 0.01, 0.1, 1, 10, 100],
+                'l1_ratio': [0.1, 0.3, 0.5, 0.7, 0.9]
+            }
+        ]
 
         # Setup GridSearchCV with stratified K-fold
         cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
@@ -190,7 +204,9 @@ class AlzheimerClassifier:
         )
 
         self.log("Running 5-fold stratified cross-validation grid search...")
-        self.log(f"Hyperparameter grid: C={param_grid['C']}, l1_ratio={param_grid['l1_ratio']}")
+        self.log("Testing L1 (Lasso), L2 (Ridge), and Elastic Net regularization")
+        self.log(f"L1/L2 regularization strength (C): {param_grid[0]['C']}")
+        self.log(f"Elastic Net l1_ratio: {param_grid[2]['l1_ratio']}")
         self.log("This may take a few minutes...")
 
         # Fit grid search
@@ -203,8 +219,10 @@ class AlzheimerClassifier:
         self.cv_results = pd.DataFrame(self.grid_search.cv_results_)
 
         self.log(f"Cross-validation completed!")
-        self.log(f"Best parameters: C={self.grid_search.best_params_['C']}, "
-                 f"l1_ratio={self.grid_search.best_params_['l1_ratio']}")
+        self.log(f"Best regularization type: {self.grid_search.best_params_['penalty']}")
+        self.log(f"Best C (inverse regularization strength): {self.grid_search.best_params_['C']}")
+        if 'l1_ratio' in self.grid_search.best_params_:
+            self.log(f"Best l1_ratio: {self.grid_search.best_params_['l1_ratio']}")
         self.log(f"Best CV accuracy: {self.grid_search.best_score_:.4f}")
 
     def plot_cv_heatmap(self):
